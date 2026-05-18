@@ -1,4 +1,4 @@
-# app.py - 360° Radar Detection System
+# app.py - 360 Radar Detection System (Python 3.11 Compatible)
 import streamlit as st
 import cv2
 import numpy as np
@@ -6,14 +6,13 @@ import time
 from datetime import datetime
 from collections import deque
 import pandas as pd
-import plotly.graph_objs as go
 import random
 import math
 
 # Page configuration
 st.set_page_config(
     page_title="360 Radar Detection System",
-    page_icon="",
+    page_icon="🛸",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -39,13 +38,6 @@ st.markdown("""
         border-radius: 10px;
         margin-bottom: 2rem;
     }
-    .detection-card {
-        background: rgba(0,0,0,0.7);
-        border-left: 4px solid #00ff00;
-        border-radius: 10px;
-        padding: 1rem;
-        margin: 0.5rem 0;
-    }
     .threat-card {
         background: rgba(255,0,0,0.1);
         border: 1px solid #ff0000;
@@ -59,12 +51,6 @@ st.markdown("""
         padding: 0.8rem;
         margin: 0.3rem 0;
     }
-    .metric-card {
-        background: rgba(0,0,0,0.5);
-        border-radius: 10px;
-        padding: 0.5rem;
-        text-align: center;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -74,8 +60,6 @@ class RealRadarSystem:
         self.scan_angle = 0
         self.scan_speed = 3
         self.radar_range_km = 10
-        self.radar_center = (400, 400)
-        self.track_history = {}
         self.next_id = 0
         
     def calculate_distance_km(self, pixels_from_center, max_pixels=350):
@@ -141,7 +125,6 @@ class RealRadarSystem:
             }
             
             self.detections.append(detection)
-            self.track_history[self.next_id] = detection
             self.next_id += 1
             
             if len(self.detections) > 12:
@@ -191,11 +174,12 @@ class RealRadarSystem:
         max_radius = min(width, height)//2 - 50
         
         # Draw radar rings
+        ring_step = max_radius / 5
         for r in range(1, 6):
-            radius = int(max_radius * (r / 5))
+            radius = int(ring_step * r)
             cv2.circle(radar_img, center, radius, (0, 100, 0), 1)
             range_km = int((r / 5) * self.radar_range_km)
-            cv2.putText(radar_img, f"{range_km}km", 
+            cv2.putText(radar_img, str(range_km) + "km", 
                        (center[0] + radius - 20, center[1]),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 150, 0), 1)
         
@@ -211,20 +195,20 @@ class RealRadarSystem:
         
         # Draw bearing ticks
         for angle in range(0, 360, 30):
-            rad = np.radians(angle)
-            x1 = center[0] + int((max_radius - 10) * np.cos(rad))
-            y1 = center[1] + int((max_radius - 10) * np.sin(rad))
-            x2 = center[0] + int(max_radius * np.cos(rad))
-            y2 = center[1] + int(max_radius * np.sin(rad))
+            rad = math.radians(angle)
+            x1 = center[0] + int((max_radius - 10) * math.cos(rad))
+            y1 = center[1] + int((max_radius - 10) * math.sin(rad))
+            x2 = center[0] + int(max_radius * math.cos(rad))
+            y2 = center[1] + int(max_radius * math.sin(rad))
             cv2.line(radar_img, (x1, y1), (x2, y2), (0, 100, 0), 1)
         
         # Draw detection trails and objects
         for detection in detections:
-            angle_rad = np.radians(detection['angle'])
+            angle_rad = math.radians(detection['angle'])
             distance = detection['distance_px']
             
-            x = center[0] + int(distance * np.cos(angle_rad))
-            y = center[1] + int(distance * np.sin(angle_rad))
+            x = center[0] + int(distance * math.cos(angle_rad))
+            y = center[1] + int(distance * math.sin(angle_rad))
             
             # Color based on speed
             if detection['speed_kmh'] > 150:
@@ -246,13 +230,13 @@ class RealRadarSystem:
                     prev_angle, prev_dist = detection['track_points'][i-1]
                     curr_angle, curr_dist = detection['track_points'][i]
                     
-                    prev_rad = np.radians(prev_angle)
-                    curr_rad = np.radians(curr_angle)
+                    prev_rad = math.radians(prev_angle)
+                    curr_rad = math.radians(curr_angle)
                     
-                    px = center[0] + int(prev_dist * np.cos(prev_rad))
-                    py = center[1] + int(prev_dist * np.sin(prev_rad))
-                    cx = center[0] + int(curr_dist * np.cos(curr_rad))
-                    cy = center[1] + int(curr_dist * np.sin(curr_rad))
+                    px = center[0] + int(prev_dist * math.cos(prev_rad))
+                    py = center[1] + int(prev_dist * math.sin(prev_rad))
+                    cx = center[0] + int(curr_dist * math.cos(curr_rad))
+                    cy = center[1] + int(curr_dist * math.sin(curr_rad))
                     
                     alpha = i / len(detection['track_points'])
                     trail_color = (0, int(200 * alpha), int(100 * (1-alpha)))
@@ -268,9 +252,9 @@ class RealRadarSystem:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
         
         # Draw scanning line
-        scan_rad = np.radians(self.scan_angle)
-        scan_x = center[0] + int(max_radius * np.cos(scan_rad))
-        scan_y = center[1] + int(max_radius * np.sin(scan_rad))
+        scan_rad = math.radians(self.scan_angle)
+        scan_x = center[0] + int(max_radius * math.cos(scan_rad))
+        scan_y = center[1] + int(max_radius * math.sin(scan_rad))
         cv2.line(radar_img, center, (scan_x, scan_y), (0, 255, 0), 2)
         cv2.circle(radar_img, (scan_x, scan_y), 5, (0, 255, 0), -1)
         
@@ -281,9 +265,9 @@ class RealRadarSystem:
         
         cv2.putText(radar_img, "RADAR SCANNING", (15, 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
-        cv2.putText(radar_img, f"Range: {self.radar_range_km}km", (15, 50),
+        cv2.putText(radar_img, "Range: " + str(self.radar_range_km) + "km", (15, 50),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 0), 1)
-        cv2.putText(radar_img, f"Objects: {len(detections)}", (15, 70),
+        cv2.putText(radar_img, "Objects: " + str(len(detections)), (15, 70),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 0), 1)
         
         return radar_img
@@ -301,10 +285,10 @@ def main():
         
         radar_range = st.slider(
             "Radar Range (km)",
-            min_value=2,
-            max_value=20,
-            value=10,
-            step=1
+            min_value=2.0,
+            max_value=20.0,
+            value=10.0,
+            step=1.0
         )
         
         scan_speed = st.slider(
@@ -317,9 +301,9 @@ def main():
         
         alert_distance = st.slider(
             "Alert Distance (km)",
-            min_value=1,
-            max_value=10,
-            value=5,
+            min_value=1.0,
+            max_value=10.0,
+            value=5.0,
             step=0.5
         )
         
@@ -335,9 +319,9 @@ def main():
             "Radar Capabilities:\n"
             "- 360 Continuous Scanning\n"
             "- Range: Up to 20km\n"
-            "- Tracks speed & altitude\n"
-            "- Real-time alerts\n"
-            "\nDetects:\n"
+            "- Tracks speed and altitude\n"
+            "- Real-time alerts\n\n"
+            "Detects:\n"
             "- Aircraft\n"
             "- Drones\n"
             "- Birds\n"
@@ -434,7 +418,6 @@ def main():
         # Display alerts
         alerts = [d for d in detections if d['distance_km'] < alert_distance]
         if alerts:
-            alerts_html = ""
             for alert in sorted(alerts, key=lambda x: x['distance_km']):
                 if alert['distance_km'] < 2:
                     threat_icon = "CRITICAL"
@@ -446,7 +429,7 @@ def main():
                     threat_icon = "CAUTION"
                     threat_color = "#ffcc00"
                 
-                alerts_html += f"""
+                alert_html = f"""
                 <div class="threat-card" style="border-left-color: {threat_color}">
                     <strong>{threat_icon}</strong><br>
                     <b>{alert['type']}</b> at {alert['distance_km']} km<br>
@@ -454,7 +437,7 @@ def main():
                     Speed: {alert['speed_kmh']} km/h
                 </div>
                 """
-            alerts_placeholder.markdown(alerts_html, unsafe_allow_html=True)
+                alerts_placeholder.markdown(alert_html, unsafe_allow_html=True)
         else:
             alerts_placeholder.success("No threats within alert range")
         
