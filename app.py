@@ -544,3 +544,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+    Active Track Example:
+ID: 42 | Type: Drone | Distance: 2.3 km | Altitude: 150m | Speed: 45 km/h | Bearing: NE
