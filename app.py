@@ -1,4 +1,4 @@
-# app.py
+# app.py - Military-Grade Flying Object Detection System
 import streamlit as st
 import cv2
 import numpy as np
@@ -9,109 +9,135 @@ from collections import deque
 import pandas as pd
 import plotly.graph_objs as go
 import random
-import os
+import math
+from scipy.spatial.distance import cdist
 
 # Page configuration
 st.set_page_config(
-    page_title="Flying Object Detection System",
-    page_icon="🛸",
+    page_title="Military Air Defense System",
+    page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better UI
+# Custom CSS for military theme
 st.markdown("""
 <style>
     .stApp {
-        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
     }
     .main-header {
         text-align: center;
         padding: 1rem;
-        background: rgba(0,0,0,0.7);
+        background: rgba(0,0,0,0.8);
+        border: 2px solid #00ff00;
         border-radius: 10px;
         margin-bottom: 2rem;
     }
-    .detection-card {
-        background: rgba(255,255,255,0.1);
+    .threat-card {
+        background: rgba(0,0,0,0.7);
+        border-left: 4px solid #ff0000;
         border-radius: 10px;
         padding: 1rem;
         margin: 0.5rem 0;
-        backdrop-filter: blur(10px);
     }
-    .metric-card {
-        background: rgba(0,0,0,0.5);
+    .warning-card {
+        background: rgba(255,0,0,0.2);
+        border: 2px solid #ff0000;
         border-radius: 10px;
         padding: 1rem;
-        text-align: center;
+        margin: 0.5rem 0;
+        animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.7; }
+        100% { opacity: 1; }
     }
     .object-badge {
         display: inline-block;
-        padding: 0.2rem 0.5rem;
+        padding: 0.3rem 0.7rem;
         margin: 0.2rem;
         border-radius: 5px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        font-size: 0.8rem;
+        font-weight: bold;
     }
-    .warning-box {
-        background: rgba(255,100,100,0.2);
-        border-left: 4px solid #ff4444;
-        padding: 1rem;
-        border-radius: 5px;
-        margin: 1rem 0;
-    }
-    .info-box {
-        background: rgba(100,100,255,0.2);
-        border-left: 4px solid #4444ff;
-        padding: 1rem;
-        border-radius: 5px;
-        margin: 1rem 0;
-    }
+    .critical { background: #ff0000; color: white; }
+    .high { background: #ff6600; color: white; }
+    .medium { background: #ffcc00; color: black; }
+    .low { background: #00ff00; color: black; }
 </style>
 """, unsafe_allow_html=True)
 
-class FlyingObjectDetector:
+class MilitaryDetector:
     def __init__(self):
         self.tracked_objects = {}
         self.next_id = 0
         self.object_history = {}
-        self.detection_history = []
+        self.threat_history = []
+        self.alerts = []
         self.fgbg = None
-        self.prev_gray = None
-        self.initialized = False
         
-    def initialize_background_subtractor(self, frame_shape):
-        """Initialize background subtractor with frame shape"""
-        if self.fgbg is None:
-            self.fgbg = cv2.createBackgroundSubtractorMOG2(
-                history=500, 
-                varThreshold=16, 
-                detectShadows=True
-            )
-            self.initialized = True
+        # Military classification database
+        self.military_objects = {
+            # Combat Aircraft
+            "F-16 Falcon": {"speed": 80, "size": (80, 120), "threat": "CRITICAL", "type": "Fighter Jet"},
+            "F-22 Raptor": {"speed": 85, "size": (85, 125), "threat": "CRITICAL", "type": "Stealth Fighter"},
+            "F-35 Lightning": {"speed": 75, "size": (80, 120), "threat": "CRITICAL", "type": "Stealth Fighter"},
+            "Su-57": {"speed": 80, "size": (80, 120), "threat": "CRITICAL", "type": "Fighter Jet"},
+            "Eurofighter": {"speed": 75, "size": (75, 115), "threat": "HIGH", "type": "Fighter Jet"},
+            "MIG-29": {"speed": 70, "size": (75, 110), "threat": "HIGH", "type": "Fighter Jet"},
+            
+            # Bombers
+            "B-2 Spirit": {"speed": 50, "size": (150, 200), "threat": "CRITICAL", "type": "Stealth Bomber"},
+            "B-52 Stratofortress": {"speed": 45, "size": (180, 250), "threat": "HIGH", "type": "Bomber"},
+            "Tu-95 Bear": {"speed": 40, "size": (160, 220), "threat": "HIGH", "type": "Bomber"},
+            
+            # Drones
+            "MQ-9 Reaper": {"speed": 35, "size": (60, 100), "threat": "HIGH", "type": "Combat Drone"},
+            "RQ-4 Global Hawk": {"speed": 30, "size": (100, 150), "threat": "MEDIUM", "type": "Recon Drone"},
+            "Bayraktar TB2": {"speed": 25, "size": (50, 80), "threat": "MEDIUM", "type": "Combat Drone"},
+            "Shahed-136": {"speed": 20, "size": (40, 60), "threat": "MEDIUM", "type": "Loitering Munition"},
+            "Switchblade": {"speed": 15, "size": (20, 40), "threat": "HIGH", "type": "Suicide Drone"},
+            
+            # Helicopters
+            "AH-64 Apache": {"speed": 30, "size": (60, 80), "threat": "HIGH", "type": "Attack Helicopter"},
+            "Mi-24 Hind": {"speed": 35, "size": (65, 85), "threat": "HIGH", "type": "Attack Helicopter"},
+            "UH-60 Black Hawk": {"speed": 25, "size": (55, 75), "threat": "MEDIUM", "type": "Utility Helicopter"},
+            "Ka-52 Alligator": {"speed": 30, "size": (60, 80), "threat": "HIGH", "type": "Attack Helicopter"},
+            
+            # Missiles
+            "Cruise Missile": {"speed": 100, "size": (30, 50), "threat": "CRITICAL", "type": "Missile"},
+            "Ballistic Missile": {"speed": 150, "size": (20, 40), "threat": "CRITICAL", "type": "Missile"},
+            "Rocket": {"speed": 90, "size": (15, 30), "threat": "HIGH", "type": "Rocket"},
+            
+            # Birds (false positives)
+            "Large Bird": {"speed": 15, "size": (20, 40), "threat": "LOW", "type": "Non-Threat"},
+            "Small Bird": {"speed": 10, "size": (10, 20), "threat": "LOW", "type": "Non-Threat"},
+        }
         
-    def detect_flying_objects(self, frame, sensitivity=0.5):
-        """Detect moving objects in frame"""
-        if frame is None or frame.size == 0:
+        # Threat levels
+        self.threat_levels = {
+            "CRITICAL": {"color": "#ff0000", "icon": "🔴", "action": "IMMEDIATE INTERCEPT"},
+            "HIGH": {"color": "#ff6600", "icon": "🟠", "action": "SCRAMBLE ALERT"},
+            "MEDIUM": {"color": "#ffcc00", "icon": "🟡", "action": "MONITOR CLOSELY"},
+            "LOW": {"color": "#00ff00", "icon": "🟢", "action": "TRACK ONLY"}
+        }
+    
+    def detect_military_objects(self, frame, sensitivity=0.5):
+        """Detect and classify military flying objects"""
+        if frame is None:
             return []
         
-        # Initialize background subtractor if needed
         if self.fgbg is None:
-            self.initialize_background_subtractor(frame.shape)
+            self.fgbg = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=16)
         
         try:
             # Apply background subtraction
             fgmask = self.fgbg.apply(frame)
+            thresh = int(20 * (1 - sensitivity))
+            _, fgmask = cv2.threshold(fgmask, thresh, 255, cv2.THRESH_BINARY)
             
-            # Apply threshold based on sensitivity
-            threshold = int(20 * (1 - sensitivity))
-            _, fgmask = cv2.threshold(fgmask, threshold, 255, cv2.THRESH_BINARY)
-            
-            # Remove noise
-            fgmask = cv2.medianBlur(fgmask, 5)
-            
-            # Morphological operations to clean up
+            # Clean up mask
             kernel = np.ones((3,3), np.uint8)
             fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_OPEN, kernel)
             fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_CLOSE, kernel)
@@ -124,772 +150,568 @@ class FlyingObjectDetector:
                 area = cv2.contourArea(contour)
                 if area > 100:  # Minimum area threshold
                     x, y, w, h = cv2.boundingRect(contour)
+                    aspect_ratio = w / h if h > 0 else 1
                     
-                    # Classify object type based on shape and size
-                    object_type = self.classify_object(w, h, area)
+                    # Calculate object characteristics
+                    speed = self.calculate_speed(contour, frame.shape)
+                    classification = self.classify_military_object(w, h, area, aspect_ratio, speed)
                     
-                    detections.append({
-                        'id': -1,  # Will be assigned during tracking
+                    detection = {
+                        'id': -1,
                         'bbox': (x, y, x+w, y+h),
                         'center': (x + w//2, y + h//2),
-                        'area': area,
                         'width': w,
                         'height': h,
-                        'type': object_type,
-                        'confidence': min(0.95, area / 1000),
+                        'area': area,
+                        'speed': speed,
+                        'classification': classification,
+                        'threat_level': self.military_objects[classification]['threat'],
+                        'object_type': self.military_objects[classification]['type'],
+                        'confidence': min(0.95, area / 1500),
                         'timestamp': datetime.now()
-                    })
+                    }
+                    detections.append(detection)
             
             # Track objects
-            tracked = self.track_objects(detections)
+            tracked = self.track_military_objects(detections)
+            
+            # Check for threats
+            self.assess_threats(tracked)
             
             # Update history
-            self.detection_history.append({
+            self.threat_history.append({
                 'timestamp': datetime.now(),
                 'count': len(tracked),
-                'objects': tracked.copy()
+                'critical_count': sum(1 for d in tracked if d.get('threat_level') == 'CRITICAL'),
+                'high_count': sum(1 for d in tracked if d.get('threat_level') == 'HIGH')
             })
             
-            # Keep only last 500 detections
-            if len(self.detection_history) > 500:
-                self.detection_history = self.detection_history[-500:]
+            if len(self.threat_history) > 200:
+                self.threat_history = self.threat_history[-200:]
             
             return tracked
             
         except Exception as e:
-            st.warning(f"Detection error: {str(e)}")
             return []
     
-    def classify_object(self, width, height, area):
-        """Classify the type of flying object"""
-        aspect_ratio = width / height if height > 0 else 1
-        
-        # Size-based classification
-        if area > 3000:
-            if aspect_ratio > 1.8:
-                return "Large Airplane"
-            else:
-                return "Helicopter"
-        elif area > 1500:
-            if aspect_ratio > 1.5:
-                return "Small Airplane"
-            else:
-                return "Large Drone"
-        elif area > 800:
-            if aspect_ratio > 1.3:
-                return "Medium Drone"
-            else:
-                return "Large Bird"
-        elif area > 300:
-            if aspect_ratio > 1.2:
-                return "Small Drone"
-            else:
-                return "Medium Bird"
-        elif area > 100:
-            if aspect_ratio > 1.5:
-                return "Small Bird"
-            else:
-                return "Bat/Insect"
-        else:
-            if aspect_ratio > 2:
-                return "Distant Bird"
-            else:
-                return "Unknown Flying Object"
+    def calculate_speed(self, contour, frame_shape):
+        """Estimate object speed based on movement"""
+        # This is a simplified estimation
+        # In production, you'd calculate based on frame-to-frame movement
+        return random.uniform(20, 150)  # Placeholder
     
-    def track_objects(self, detections):
-        """Track objects across frames"""
-        tracked_objects = []
+    def classify_military_object(self, width, height, area, aspect_ratio, speed):
+        """Classify the detected object as specific military hardware"""
         
-        if not detections:
-            # Still need to clean up old objects
-            self.cleanup_old_objects()
-            return tracked_objects
+        # Size-based primary classification
+        if area > 20000:  # Very large
+            if aspect_ratio > 1.5:
+                return "B-52 Stratofortress"
+            else:
+                return "B-2 Spirit"
+        
+        elif area > 10000:  # Large aircraft
+            if speed > 70:
+                return "F-22 Raptor"
+            elif speed > 50:
+                return "F-16 Falcon"
+            else:
+                return "B-52 Stratofortress"
+        
+        elif area > 5000:  # Medium aircraft
+            if aspect_ratio > 1.3:
+                if speed > 60:
+                    return "F-35 Lightning"
+                else:
+                    return "MQ-9 Reaper"
+            else:
+                return "AH-64 Apache"
+        
+        elif area > 2000:  # Small aircraft/drones
+            if speed > 40:
+                if aspect_ratio > 1.5:
+                    return "RQ-4 Global Hawk"
+                else:
+                    return "Bayraktar TB2"
+            else:
+                return "UH-60 Black Hawk"
+        
+        elif area > 500:  # Very small
+            if speed > 80:
+                if aspect_ratio > 2:
+                    return "Cruise Missile"
+                else:
+                    return "Ballistic Missile"
+            else:
+                return "Switchblade"
+        
+        else:  # Tiny objects
+            if speed > 50:
+                return "Rocket"
+            else:
+                return "Large Bird" if area > 200 else "Small Bird"
+    
+    def track_military_objects(self, detections):
+        """Track objects across frames"""
+        tracked = []
         
         for detection in detections:
             matched = False
-            best_match_id = None
-            best_distance = float('inf')
+            best_match = None
+            best_dist = float('inf')
             
-            # Try to match with existing objects
-            for obj_id, obj in list(self.tracked_objects.items()):
-                if obj.get('center'):
-                    distance = np.sqrt(
-                        (detection['center'][0] - obj['center'][0])**2 + 
+            for obj_id, obj in self.tracked_objects.items():
+                if 'center' in obj:
+                    dist = np.sqrt(
+                        (detection['center'][0] - obj['center'][0])**2 +
                         (detection['center'][1] - obj['center'][1])**2
                     )
-                    
-                    # Type similarity bonus
-                    type_bonus = 20 if obj.get('type') == detection['type'] else 0
-                    adjusted_distance = distance - type_bonus
-                    
-                    if adjusted_distance < 50 and adjusted_distance < best_distance:
-                        best_distance = adjusted_distance
-                        best_match_id = obj_id
+                    if dist < 60 and dist < best_dist:
+                        best_dist = dist
+                        best_match = obj_id
                         matched = True
             
-            if matched and best_match_id is not None:
-                # Update existing object
-                obj = self.tracked_objects[best_match_id]
-                self.tracked_objects[best_match_id] = {
+            if matched and best_match is not None:
+                # Update existing track
+                self.tracked_objects[best_match].update({
                     'center': detection['center'],
                     'bbox': detection['bbox'],
-                    'type': detection['type'],
+                    'classification': detection['classification'],
+                    'threat_level': detection['threat_level'],
                     'last_seen': datetime.now(),
                     'confidence': detection['confidence'],
-                    'track_length': obj.get('track_length', 0) + 1,
-                    'first_seen': obj.get('first_seen', datetime.now())
-                }
-                detection['id'] = best_match_id
+                    'track_length': self.tracked_objects[best_match].get('track_length', 0) + 1,
+                    'speed_history': self.tracked_objects[best_match].get('speed_history', []) + [detection.get('speed', 0)]
+                })
+                detection['id'] = best_match
             else:
-                # Create new object
+                # New track
                 detection['id'] = self.next_id
                 self.tracked_objects[self.next_id] = {
                     'center': detection['center'],
                     'bbox': detection['bbox'],
-                    'type': detection['type'],
+                    'classification': detection['classification'],
+                    'threat_level': detection['threat_level'],
                     'first_seen': datetime.now(),
                     'last_seen': datetime.now(),
                     'confidence': detection['confidence'],
-                    'track_length': 1
+                    'track_length': 1,
+                    'speed_history': [detection.get('speed', 0)]
                 }
                 self.next_id += 1
             
-            # Store history for trails
+            # Store trajectory
             if detection['id'] not in self.object_history:
-                self.object_history[detection['id']] = deque(maxlen=30)
+                self.object_history[detection['id']] = deque(maxlen=50)
             self.object_history[detection['id']].append(detection['center'])
             
-            tracked_objects.append(detection)
+            tracked.append(detection)
         
-        # Clean up old objects
-        self.cleanup_old_objects()
-        
-        return tracked_objects
-    
-    def cleanup_old_objects(self):
-        """Remove objects not seen recently"""
+        # Cleanup old tracks
         current_time = datetime.now()
-        to_remove = []
+        to_remove = [oid for oid, obj in self.tracked_objects.items() 
+                    if (current_time - obj['last_seen']).total_seconds() > 3]
         
-        for obj_id, obj in self.tracked_objects.items():
-            time_diff = (current_time - obj['last_seen']).total_seconds()
-            if time_diff > 2.0:  # Remove after 2 seconds
-                to_remove.append(obj_id)
+        for oid in to_remove:
+            del self.tracked_objects[oid]
+            if oid in self.object_history:
+                del self.object_history[oid]
         
-        for obj_id in to_remove:
-            del self.tracked_objects[obj_id]
-            if obj_id in self.object_history:
-                del self.object_history[obj_id]
+        return tracked
     
-    def draw_detections(self, frame, detections, show_trails=True, show_boxes=True, show_labels=True):
-        """Draw detections on frame"""
+    def assess_threats(self, detections):
+        """Assess and generate alerts for threats"""
+        critical_threats = [d for d in detections if d.get('threat_level') == 'CRITICAL']
+        high_threats = [d for d in detections if d.get('threat_level') == 'HIGH']
+        
+        # Generate alerts for new critical threats
+        for threat in critical_threats:
+            if threat['id'] not in [a.get('id') for a in self.alerts[-10:]]:
+                self.alerts.append({
+                    'id': threat['id'],
+                    'classification': threat['classification'],
+                    'threat_level': threat['threat_level'],
+                    'timestamp': datetime.now(),
+                    'message': f"⚠️ CRITICAL THREAT: {threat['classification']} detected! Immediate intercept required!"
+                })
+        
+        # Keep only recent alerts
+        if len(self.alerts) > 50:
+            self.alerts = self.alerts[-50:]
+    
+    def draw_military_display(self, frame, detections):
+        """Draw military-style threat display"""
         if frame is None:
             return np.zeros((480, 640, 3), dtype=np.uint8)
         
-        display_frame = frame.copy()
+        display = frame.copy()
         
-        # Color map for different object types
-        colors = {
-            "Large Airplane": (0, 255, 0),      # Green
-            "Small Airplane": (50, 200, 50),    # Light Green
-            "Helicopter": (255, 255, 0),        # Cyan
-            "Large Drone": (0, 165, 255),       # Orange
-            "Medium Drone": (50, 150, 255),     # Light Orange
-            "Small Drone": (100, 135, 255),     # Yellow-Orange
-            "Large Bird": (255, 0, 0),          # Blue
-            "Medium Bird": (200, 50, 50),       # Light Blue
-            "Small Bird": (150, 100, 100),      # Lighter Blue
-            "Bat/Insect": (0, 255, 255),        # Yellow
-            "Distant Bird": (255, 100, 0),      # Light Blue-Green
-            "Unknown Flying Object": (255, 255, 255)  # White
+        # Threat colors
+        threat_colors = {
+            "CRITICAL": (0, 0, 255),      # Red
+            "HIGH": (0, 100, 255),        # Orange
+            "MEDIUM": (0, 255, 255),      # Yellow
+            "LOW": (0, 255, 0)            # Green
         }
         
-        # Draw trails first (behind bounding boxes)
-        if show_trails:
-            for detection in detections:
-                obj_id = detection['id']
-                if obj_id in self.object_history:
-                    trail = list(self.object_history[obj_id])
-                    color = colors.get(detection['type'], (255, 255, 255))
-                    
-                    # Draw trail lines
-                    for i in range(1, len(trail)):
-                        alpha = i / len(trail)
-                        trail_color = (
-                            int(color[0] * alpha),
-                            int(color[1] * alpha),
-                            int(color[2] * alpha)
-                        )
-                        thickness = max(1, int(3 * alpha))
-                        cv2.line(display_frame, trail[i-1], trail[i], trail_color, thickness)
+        # Draw threat rings around critical objects
+        for detection in detections:
+            if detection.get('threat_level') == 'CRITICAL':
+                center = detection['center']
+                for r in range(20, 80, 20):
+                    cv2.circle(display, center, r, (0, 0, 255), 2)
         
-        # Draw bounding boxes and labels
+        # Draw tracked objects
         for detection in detections:
             bbox = detection['bbox']
-            obj_type = detection['type']
-            confidence = detection['confidence']
-            obj_id = detection['id']
+            threat_level = detection.get('threat_level', 'LOW')
+            color = threat_colors.get(threat_level, (255, 255, 255))
             
-            color = colors.get(obj_type, (255, 255, 255))
+            # Draw bounding box
+            cv2.rectangle(display, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 3)
             
-            if show_boxes:
-                # Draw bounding box
-                cv2.rectangle(display_frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 2)
-                
-                # Draw center point
-                cv2.circle(display_frame, detection['center'], 4, color, -1)
-                
-                # Draw confidence circle
-                radius = int(15 * confidence)
-                cv2.circle(display_frame, detection['center'], radius, color, 1)
+            # Draw center
+            cv2.circle(display, detection['center'], 5, color, -1)
             
-            if show_labels:
-                # Create label text
-                label = f"ID:{obj_id} {obj_type}"
-                if confidence > 0:
-                    label += f" ({confidence:.0%})"
-                
-                # Calculate text size
-                font_scale = 0.4
-                thickness = 1
-                (text_width, text_height), baseline = cv2.getTextSize(
-                    label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness
-                )
-                
-                # Draw label background
-                label_y = max(bbox[1] - 5, text_height + 10)
-                cv2.rectangle(display_frame,
-                            (bbox[0], label_y - text_height - 5),
-                            (bbox[0] + text_width + 5, label_y + 5),
-                            color, -1)
-                
-                # Draw label text
-                cv2.putText(display_frame, label,
-                          (bbox[0] + 2, label_y),
-                          cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), thickness)
-                
-                # Draw track length if significant
-                if detection['id'] in self.tracked_objects:
-                    track_length = self.tracked_objects[detection['id']].get('track_length', 0)
-                    if track_length > 10:
-                        track_label = f"Track: {track_length}f"
-                        cv2.putText(display_frame, track_label,
-                                  (bbox[0], bbox[3] + 15),
-                                  cv2.FONT_HERSHEY_SIMPLEX, 0.35, color, 1)
-        
-        # Add info overlay
-        active_count = len(detections)
-        total_tracked = len(self.tracked_objects)
-        
-        overlay = display_frame.copy()
-        cv2.rectangle(overlay, (5, 5), (250, 70), (0, 0, 0), -1)
-        display_frame = cv2.addWeighted(overlay, 0.3, display_frame, 0.7, 0)
-        
-        cv2.putText(display_frame, f"Active Objects: {active_count}", (10, 25),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        cv2.putText(display_frame, f"Total Tracked: {total_tracked}", (10, 50),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        
-        return display_frame
-    
-    def reset(self):
-        """Reset the detector state"""
-        self.tracked_objects = {}
-        self.next_id = 0
-        self.object_history = {}
-        self.detection_history = []
-        self.fgbg = None
-        self.prev_gray = None
-        self.initialized = False
-
-def initialize_session_state():
-    """Initialize all session state variables"""
-    if 'detector' not in st.session_state:
-        st.session_state.detector = FlyingObjectDetector()
-    
-    if 'detection_log' not in st.session_state:
-        st.session_state.detection_log = []
-    
-    if 'is_detecting' not in st.session_state:
-        st.session_state.is_detecting = False
-    
-    if 'frame_count' not in st.session_state:
-        st.session_state.frame_count = 0
-    
-    if 'fps' not in st.session_state:
-        st.session_state.fps = 0
-    
-    if 'last_time' not in st.session_state:
-        st.session_state.last_time = time.time()
-    
-    if 'cap' not in st.session_state:
-        st.session_state.cap = None
-    
-    if 'sim_objects' not in st.session_state:
-        st.session_state.sim_objects = []
-
-def create_simulation_objects():
-    """Create random objects for simulation mode"""
-    if not st.session_state.sim_objects:
-        object_types = ['Airplane', 'Drone', 'Bird', 'Helicopter']
-        for _ in range(random.randint(2, 6)):
-            st.session_state.sim_objects.append({
-                'pos': [random.randint(100, 540), random.randint(100, 380)],
-                'vel': [random.uniform(-3, 3), random.uniform(-3, 3)],
-                'type': random.choice(object_types),
-                'size': random.randint(15, 40)
-            })
-
-def update_simulation_frame(frame):
-    """Update frame with simulated flying objects"""
-    if frame is None or frame.size == 0:
-        frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        frame[:] = (30, 30, 50)  # Dark blue background
-    
-    # Create or update simulation objects
-    create_simulation_objects()
-    
-    # Update and draw objects
-    for obj in st.session_state.sim_objects:
-        # Update position
-        obj['pos'][0] += obj['vel'][0]
-        obj['pos'][1] += obj['vel'][1]
-        
-        # Bounce off edges with damping
-        if obj['pos'][0] < 50 or obj['pos'][0] > 590:
-            obj['vel'][0] = -obj['vel'][0] * 0.95
-            obj['pos'][0] = max(50, min(590, obj['pos'][0]))
-        
-        if obj['pos'][1] < 50 or obj['pos'][1] > 430:
-            obj['vel'][1] = -obj['vel'][1] * 0.95
-            obj['pos'][1] = max(50, min(430, obj['pos'][1]))
-        
-        # Draw object with different shapes based on type
-        center = tuple(map(int, obj['pos']))
-        
-        if obj['type'] == 'Airplane':
-            # Draw airplane shape
-            pts = np.array([
-                center,
-                (center[0] - obj['size'], center[1] - obj['size']//2),
-                (center[0] - obj['size']//2, center[1]),
-                (center[0] - obj['size'], center[1] + obj['size']//2)
-            ], np.int32)
-            cv2.fillPoly(frame, [pts], (0, 255, 0))
-            cv2.circle(frame, center, obj['size']//3, (0, 200, 0), -1)
+            # Draw threat indicator
+            threat_icon = self.threat_levels[threat_level]['icon']
+            cv2.putText(display, threat_icon, (bbox[0] - 20, bbox[1]),
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
             
-        elif obj['type'] == 'Drone':
-            # Draw drone (quadcopter shape)
-            cv2.circle(frame, center, obj['size']//2, (0, 165, 255), -1)
-            for angle in [0, 90, 180, 270]:
-                rad = np.radians(angle)
-                arm_end = (int(center[0] + obj['size'] * np.cos(rad)),
-                          int(center[1] + obj['size'] * np.sin(rad)))
-                cv2.line(frame, center, arm_end, (0, 165, 255), 2)
-                cv2.circle(frame, arm_end, obj['size']//4, (0, 165, 255), -1)
-                
-        elif obj['type'] == 'Bird':
-            # Draw bird shape
-            cv2.ellipse(frame, center, (obj['size'], obj['size']//2), 
-                       0, 0, 360, (255, 100, 0), -1)
-            # Wing
-            wing_angle = 30 * np.sin(time.time() * 10)
-            wing_end = (int(center[0] + obj['size'] * np.cos(np.radians(wing_angle))),
-                       int(center[1] - obj['size']//2))
-            cv2.line(frame, center, wing_end, (255, 100, 0), 3)
+            # Draw labels
+            label = f"{detection['classification']} [{detection.get('threat_level', 'UNKNOWN')}]"
+            if detection.get('speed', 0) > 0:
+                label += f" {detection['speed']:.0f}km/h"
             
-        else:  # Helicopter
-            cv2.ellipse(frame, center, (obj['size']//2, obj['size']), 
-                       0, 0, 360, (255, 255, 0), -1)
-            # Rotor
-            rotor_angle = time.time() * 50
-            rotor_end1 = (int(center[0] + obj['size'] * np.cos(rotor_angle)),
-                         int(center[1] + obj['size'] * np.sin(rotor_angle)))
-            rotor_end2 = (int(center[0] - obj['size'] * np.cos(rotor_angle)),
-                         int(center[1] - obj['size'] * np.sin(rotor_angle)))
-            cv2.line(frame, rotor_end1, rotor_end2, (255, 255, 0), 2)
+            # Label background
+            (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            cv2.rectangle(display, (bbox[0], bbox[1] - text_h - 5),
+                         (bbox[0] + text_w + 10, bbox[1]), color, -1)
+            cv2.putText(display, label, (bbox[0] + 5, bbox[1] - 5),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+            
+            # Draw trajectory trail
+            if detection['id'] in self.object_history:
+                trail = list(self.object_history[detection['id']])
+                for i in range(1, len(trail)):
+                    alpha = i / len(trail)
+                    trail_color = tuple(int(c * alpha) for c in color)
+                    cv2.line(display, trail[i-1], trail[i], trail_color, 2)
         
-        # Add label
-        cv2.putText(frame, obj['type'], 
-                   (center[0] - 20, center[1] - obj['size']//2 - 5),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-    
-    return frame
+        # Add HUD overlay
+        overlay = display.copy()
+        cv2.rectangle(overlay, (5, 5), (300, 120), (0, 0, 0), -1)
+        display = cv2.addWeighted(overlay, 0.6, display, 0.4, 0)
+        
+        # HUD Information
+        critical_count = sum(1 for d in detections if d.get('threat_level') == 'CRITICAL')
+        high_count = sum(1 for d in detections if d.get('threat_level') == 'HIGH')
+        
+        cv2.putText(display, "MILITARY AIR DEFENSE SYSTEM", (10, 25),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(display, f"Active Tracks: {len(detections)}", (10, 50),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(display, f"CRITICAL: {critical_count} | HIGH: {high_count}", (10, 70),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+        
+        # Threat level indicator
+        if critical_count > 0:
+            threat_text = "⚠️ CRITICAL THREAT - IMMEDIATE ACTION REQUIRED ⚠️"
+            cv2.putText(display, threat_text, (10, 100),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        
+        return display
 
 def main():
     # Header
     st.markdown('<div class="main-header">', unsafe_allow_html=True)
-    st.title("🛸 Advanced Flying Object Detection System")
-    st.markdown("### Real-time Detection of Airplanes, Drones, Birds, and Other Flying Objects")
+    st.markdown("# 🛡️ MILITARY AIR DEFENSE SYSTEM")
+    st.markdown("### Real-time Detection & Tracking of Military Aircraft, Drones, and Missiles")
     st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Initialize session state
-    initialize_session_state()
     
     # Sidebar
     with st.sidebar:
-        st.markdown("## 🎮 Controls")
+        st.markdown("## 🎮 DEFENSE CONTROLS")
         
-        # Input source selection
-        source_option = st.radio(
-            "Select Input Source",
-            ["📹 Webcam", "🎥 Simulation Mode", "📁 Upload Video"],
-            help="Webcam requires browser permission. Simulation creates random flying objects."
+        mode = st.radio(
+            "Sensor Mode",
+            ["🎮 Simulation Mode", "📹 Webcam Feed", "📁 Intelligence File"],
+            help="Select threat detection source"
         )
         
         st.markdown("---")
-        st.markdown("## ⚙️ Detection Settings")
+        st.markdown("## ⚙️ SENSOR SETTINGS")
         
         sensitivity = st.slider(
             "Detection Sensitivity", 
-            0.1, 1.0, 0.5, 0.05,
-            help="Higher sensitivity detects more objects but may increase false positives"
+            0.1, 1.0, 0.7, 0.05,
+            help="Higher sensitivity for threat detection"
         )
         
-        min_object_size = st.slider(
-            "Minimum Object Size", 
-            50, 500, 100, 10,
-            help="Ignore objects smaller than this size (in pixels)"
+        alert_threshold = st.select_slider(
+            "Alert Threshold",
+            options=["CRITICAL", "HIGH", "MEDIUM", "LOW"],
+            value="HIGH",
+            help="Minimum threat level to generate alerts"
         )
         
         st.markdown("---")
-        st.markdown("## 🎨 Display Options")
+        st.markdown("## 🎨 DISPLAY OPTIONS")
         
-        show_trails = st.checkbox("Show Movement Trails", True)
-        show_boxes = st.checkbox("Show Bounding Boxes", True)
-        show_labels = st.checkbox("Show Labels", True)
-        show_stats = st.checkbox("Show Statistics Panel", True)
-        
-        st.markdown("---")
-        
-        if st.button("🔄 Reset Detector", use_container_width=True):
-            st.session_state.detector.reset()
-            st.session_state.detection_log = []
-            st.session_state.sim_objects = []
-            st.success("Detector reset successfully!")
+        show_trails = st.checkbox("Show Trajectory Trails", True)
+        show_threat_rings = st.checkbox("Show Threat Rings", True)
+        show_hud = st.checkbox("Show HUD", True)
         
         st.markdown("---")
-        st.markdown("## 📊 About")
-        st.info("""
-        **Detected Object Types:**
-        - ✈️ Large/Small Airplanes
-        - 🚁 Helicopters
-        - 🛸 Large/Medium/Small Drones
-        - 🐦 Large/Medium/Small Birds
-        - 🦋 Bats & Insects
-        - 🎯 Distant Objects
         
-        **Features:**
-        - Real-time motion detection
-        - Multi-object tracking
-        - Movement trail visualization
-        - Object classification by size/shape
-        """)
+        if st.button("🔄 RESET SYSTEM", use_container_width=True):
+            st.session_state.clear()
+            st.rerun()
     
-    # Main content area
+    # Main display
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.markdown("## 📹 Detection Feed")
+        st.markdown("## 📡 THREAT DETECTION FEED")
         video_placeholder = st.empty()
         
         # Status indicators
-        status_col1, status_col2, status_col3 = st.columns(3)
-        with status_col1:
-            detection_status = st.empty()
-        with status_col2:
-            object_count = st.empty()
-        with status_col3:
-            fps_display = st.empty()
+        status_cols = st.columns(4)
+        with status_cols[0]:
+            threat_level_placeholder = st.empty()
+        with status_cols[1]:
+            track_count_placeholder = st.empty()
+        with status_cols[2]:
+            critical_count_placeholder = st.empty()
+        with status_cols[3]:
+            fps_placeholder = st.empty()
     
     with col2:
-        st.markdown("## 📋 Live Detection Log")
-        log_placeholder = st.empty()
+        st.markdown("## ⚠️ ACTIVE THREATS")
+        alerts_placeholder = st.empty()
         
-        if show_stats:
-            st.markdown("## 📈 Current Objects")
-            stats_placeholder = st.empty()
+        st.markdown("## 📊 THREAT ASSESSMENT")
+        stats_placeholder = st.empty()
     
-    # Handle video source
-    cap = None
+    # Initialize session state
+    if 'detector' not in st.session_state:
+        st.session_state.detector = MilitaryDetector()
+        st.session_state.is_running = False
+        st.session_state.threat_log = []
+        st.session_state.frame_count = 0
+        st.session_state.fps = 0
+        st.session_state.last_time = time.time()
     
-    if source_option == "📹 Webcam":
-        st.info("📸 Webcam mode - Click 'Start Detection' to begin")
-        try:
+    # Start/Stop controls
+    btn_cols = st.columns(2)
+    with btn_cols[0]:
+        if st.button("🚀 ACTIVATE SYSTEM", type="primary", use_container_width=True):
+            st.session_state.is_running = True
+            st.session_state.threat_log = []
+            st.session_state.detector.alerts = []
+    
+    with btn_cols[1]:
+        if st.button("🔒 STANDBY MODE", use_container_width=True):
+            st.session_state.is_running = False
+    
+    # Main detection loop
+    if st.session_state.is_running:
+        # Handle different modes
+        if mode == "🎮 Simulation Mode":
+            # Simulation mode for testing
+            frame = np.zeros((480, 640, 3), dtype=np.uint8)
+            frame[:] = (20, 20, 40)
+            
+            # Generate simulated military objects
+            if not hasattr(st.session_state, 'sim_targets'):
+                st.session_state.sim_targets = []
+                military_types = [
+                    "F-22 Raptor", "MQ-9 Reaper", "AH-64 Apache", 
+                    "Cruise Missile", "B-2 Spirit", "Su-57"
+                ]
+                for i in range(random.randint(2, 5)):
+                    st.session_state.sim_targets.append({
+                        'pos': [random.randint(100, 540), random.randint(100, 380)],
+                        'vel': [random.uniform(-2, 2), random.uniform(-2, 2)],
+                        'type': random.choice(military_types),
+                        'size': random.randint(20, 60)
+                    })
+            
+            # Update and draw simulation targets
+            for target in st.session_state.sim_targets:
+                target['pos'][0] += target['vel'][0]
+                target['pos'][1] += target['vel'][1]
+                
+                if target['pos'][0] < 50 or target['pos'][0] > 590:
+                    target['vel'][0] = -target['vel'][0]
+                if target['pos'][1] < 50 or target['pos'][1] > 430:
+                    target['vel'][1] = -target['vel'][1]
+                
+                target['pos'][0] = max(50, min(590, target['pos'][0]))
+                target['pos'][1] = max(50, min(430, target['pos'][1]))
+                
+                # Draw based on threat level
+                threat_level = st.session_state.detector.military_objects[target['type']]['threat']
+                color = (0, 0, 255) if threat_level == "CRITICAL" else (0, 100, 255)
+                
+                # Draw with label
+                cv2.circle(frame, tuple(map(int, target['pos'])), target['size']//2, color, -1)
+                cv2.putText(frame, target['type'], 
+                          (int(target['pos'][0]) - 25, int(target['pos'][1]) - 15),
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+            
+            # Process frame
+            detections = st.session_state.detector.detect_military_objects(frame, sensitivity)
+            display_frame = st.session_state.detector.draw_military_display(frame, detections)
+            
+        elif mode == "📹 Webcam Feed":
             cap = cv2.VideoCapture(0)
             if not cap.isOpened():
-                st.warning("⚠️ Webcam not accessible. Using simulation mode instead.")
-                cap = None
-                source_option = "🎥 Simulation Mode"
-        except:
-            st.warning("⚠️ Webcam error. Using simulation mode instead.")
-            cap = None
-            source_option = "🎥 Simulation Mode"
-    
-    elif source_option == "📁 Upload Video":
-        uploaded_file = st.file_uploader(
-            "Choose a video file", 
-            type=['mp4', 'avi', 'mov', 'mkv', 'mpg', 'mpeg']
-        )
-        if uploaded_file is not None:
-            # Save temporary file
-            temp_path = "temp_video.mp4"
-            with open(temp_path, "wb") as f:
-                f.write(uploaded_file.read())
-            cap = cv2.VideoCapture(temp_path)
-            st.success(f"✅ Loaded: {uploaded_file.name}")
-        else:
-            cap = None
-    
-    else:  # Simulation Mode
-        st.info("🎮 Simulation mode - Random flying objects will be generated")
-        cap = None
-    
-    # Start/Stop buttons
-    btn_col1, btn_col2, btn_col3 = st.columns(3)
-    with btn_col1:
-        if st.button("🚀 Start Detection", type="primary", use_container_width=True):
-            st.session_state.is_detecting = True
-            st.session_state.detection_log = []
-            st.session_state.frame_count = 0
-            st.session_state.last_time = time.time()
-            st.rerun()
-    
-    with btn_col2:
-        if st.button("⏹️ Stop Detection", type="secondary", use_container_width=True):
-            st.session_state.is_detecting = False
-            if st.session_state.cap:
-                st.session_state.cap.release()
-                st.session_state.cap = None
-            st.rerun()
-    
-    with btn_col3:
-        if st.button("🗑️ Clear Log", use_container_width=True):
-            st.session_state.detection_log = []
-            st.success("Log cleared!")
-    
-    # Detection loop
-    if st.session_state.is_detecting:
-        frame_placeholder = st.empty()
-        last_frame_time = time.time()
-        
-        # Create a container for the loop
-        loop_container = st.empty()
-        
-        while st.session_state.is_detecting:
-            loop_start = time.time()
+                st.error("⚠️ Webcam not accessible")
+                st.session_state.is_running = False
+                return
             
-            # Get frame from source
-            if cap is not None and cap.isOpened():
+            ret, frame = cap.read()
+            if ret:
+                detections = st.session_state.detector.detect_military_objects(frame, sensitivity)
+                display_frame = st.session_state.detector.draw_military_display(frame, detections)
+            cap.release()
+        
+        else:  # Intelligence File
+            uploaded_file = st.file_uploader("Upload intelligence video", type=['mp4', 'avi', 'mov'])
+            if uploaded_file:
+                with open("temp_intel.mp4", "wb") as f:
+                    f.write(uploaded_file.read())
+                cap = cv2.VideoCapture("temp_intel.mp4")
                 ret, frame = cap.read()
-                if not ret:
-                    if source_option == "📁 Upload Video":
-                        # Loop video
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                        continue
-                    else:
-                        st.warning("End of video reached")
-                        st.session_state.is_detecting = False
-                        break
+                if ret:
+                    detections = st.session_state.detector.detect_military_objects(frame, sensitivity)
+                    display_frame = st.session_state.detector.draw_military_display(frame, detections)
+                cap.release()
             else:
-                # Simulation mode
-                if frame_placeholder.empty():
-                    frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                    frame[:] = (30, 30, 50)
-                else:
-                    frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                    frame[:] = (30, 30, 50)
+                st.warning("No intelligence file loaded")
+                st.session_state.is_running = False
+                return
+        
+        # Calculate FPS
+        st.session_state.frame_count += 1
+        current_time = time.time()
+        if current_time - st.session_state.last_time >= 1.0:
+            st.session_state.fps = st.session_state.frame_count
+            st.session_state.frame_count = 0
+            st.session_state.last_time = current_time
+        
+        # Update displays
+        critical_count = sum(1 for d in detections if d.get('threat_level') == 'CRITICAL')
+        high_count = sum(1 for d in detections if d.get('threat_level') == 'HIGH')
+        
+        if critical_count > 0:
+            threat_level_placeholder.markdown(f"### 🔴 THREAT LEVEL: CRITICAL")
+        elif high_count > 0:
+            threat_level_placeholder.markdown(f"### 🟠 THREAT LEVEL: HIGH")
+        else:
+            threat_level_placeholder.markdown(f"### 🟢 THREAT LEVEL: MONITORING")
+        
+        track_count_placeholder.metric("Active Tracks", len(detections))
+        critical_count_placeholder.metric("CRITICAL THREATS", critical_count, delta_color="inverse")
+        fps_placeholder.metric("System FPS", st.session_state.fps)
+        
+        # Display active threats
+        if st.session_state.detector.alerts:
+            alerts_html = ""
+            for alert in st.session_state.detector.alerts[-5:]:
+                threat_level = alert['threat_level']
+                color = "#ff0000" if threat_level == "CRITICAL" else "#ff6600"
+                alerts_html += f"""
+                <div class="warning-card" style="border-left-color: {color}">
+                    <strong>{alert['threat_level']}</strong><br>
+                    {alert['message']}<br>
+                    <small>{alert['timestamp'].strftime("%H:%M:%S")}</small>
+                </div>
+                """
+            alerts_placeholder.markdown(alerts_html, unsafe_allow_html=True)
+        else:
+            alerts_placeholder.info("No active threats detected")
+        
+        # Display statistics
+        if detections:
+            threat_counts = {}
+            type_counts = {}
+            
+            for d in detections:
+                threat = d.get('threat_level', 'UNKNOWN')
+                threat_counts[threat] = threat_counts.get(threat, 0) + 1
                 
-                frame = update_simulation_frame(frame)
+                obj_type = d.get('object_type', 'Unknown')
+                type_counts[obj_type] = type_counts.get(obj_type, 0) + 1
             
-            # Calculate FPS
-            st.session_state.frame_count += 1
-            current_time = time.time()
-            time_diff = current_time - st.session_state.last_time
+            stats_html = '<div class="detection-card">'
+            stats_html += '<h4>Threat Breakdown</h4>'
+            for threat, count in threat_counts.items():
+                css_class = "critical" if threat == "CRITICAL" else "high" if threat == "HIGH" else "medium"
+                stats_html += f'<span class="object-badge {css_class}">{threat}: {count}</span>'
             
-            if time_diff >= 1.0:
-                st.session_state.fps = st.session_state.frame_count
-                st.session_state.frame_count = 0
-                st.session_state.last_time = current_time
+            stats_html += '<h4 style="margin-top: 10px">Asset Classification</h4>'
+            for obj_type, count in type_counts.items():
+                stats_html += f'<span class="object-badge">{obj_type}: {count}</span>'
             
-            # Detect objects (only in non-simulation mode or for demo)
-            if source_option != "🎥 Simulation Mode":
-                detections = st.session_state.detector.detect_flying_objects(frame, sensitivity)
-            else:
-                # In simulation mode, treat simulation objects as detections
-                detections = []
-                for i, sim_obj in enumerate(st.session_state.sim_objects):
-                    # Create detection from simulation object
-                    pos = sim_obj['pos']
-                    size = sim_obj['size']
-                    detections.append({
-                        'id': i,
-                        'bbox': (int(pos[0]-size), int(pos[1]-size), 
-                                int(pos[0]+size), int(pos[1]+size)),
-                        'center': (int(pos[0]), int(pos[1])),
-                        'area': size * size,
-                        'width': size * 2,
-                        'height': size * 2,
-                        'type': sim_obj['type'],
-                        'confidence': 0.85,
-                        'timestamp': datetime.now()
-                    })
-            
-            # Filter by size
-            detections = [d for d in detections if d['area'] >= min_object_size]
-            
-            # Draw on frame
-            if source_option != "🎥 Simulation Mode":
-                display_frame = st.session_state.detector.draw_detections(
-                    frame, detections, show_trails, show_boxes, show_labels
-                )
-            else:
-                # For simulation, just show the frame with labels
-                display_frame = frame
-                
-                # Add overlay info
-                cv2.putText(display_frame, f"SIMULATION MODE", (10, 30),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                cv2.putText(display_frame, f"Objects: {len(detections)}", (10, 60),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-            
-            # Update status displays
-            detection_status.metric("Detection Status", 
-                                   "🟢 Active" if detections else "🟡 Monitoring")
-            object_count.metric("Objects Detected", len(detections))
-            fps_display.metric("FPS", st.session_state.fps)
-            
-            # Log detections
-            for detection in detections:
-                log_entry = {
-                    'Time': datetime.now().strftime("%H:%M:%S"),
-                    'ID': detection['id'],
-                    'Type': detection['type'],
-                    'Confidence': f"{detection.get('confidence', 0):.2f}",
-                    'Area': detection.get('area', 0)
-                }
-                st.session_state.detection_log.append(log_entry)
-                
-                # Keep only last 100 entries
-                if len(st.session_state.detection_log) > 100:
-                    st.session_state.detection_log = st.session_state.detection_log[-100:]
-            
-            # Update log display
-            if st.session_state.detection_log:
-                log_df = pd.DataFrame(st.session_state.detection_log[-10:])
-                log_placeholder.dataframe(log_df, use_container_width=True)
-            
-            # Update statistics
-            if show_stats and detections:
-                stats_data = []
-                type_counts = {}
-                
-                for detection in detections:
-                    obj_type = detection['type']
-                    type_counts[obj_type] = type_counts.get(obj_type, 0) + 1
-                    
-                    stats_data.append({
-                        'ID': detection['id'],
-                        'Type': detection['type'],
-                        'Confidence': f"{detection.get('confidence', 0):.2f}",
-                        'Area': detection.get('area', 0)
-                    })
-                
-                # Show statistics
-                stats_html = '<div class="detection-card">'
-                stats_html += '<h4>📊 Object Breakdown</h4>'
-                stats_html += '<div>'
-                for obj_type, count in type_counts.items():
-                    stats_html += f'<span class="object-badge">{obj_type}: {count}</span>'
-                stats_html += '</div></div>'
-                stats_placeholder.markdown(stats_html, unsafe_allow_html=True)
-                
-                # Show detailed table in expander
-                with st.expander("Show Detailed Table"):
-                    st.dataframe(pd.DataFrame(stats_data), use_container_width=True)
-            
-            # Convert to RGB for display
-            display_frame_rgb = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
-            video_placeholder.image(display_frame_rgb, channels="RGB", use_container_width=True)
-            
-            # Control frame rate (target 30 FPS)
-            loop_time = time.time() - loop_start
-            sleep_time = max(0, 0.033 - loop_time)  # ~30 FPS
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-            
-            # Check if we should continue (allows stop button to work)
-            if not st.session_state.is_detecting:
-                break
+            stats_html += '</div>'
+            stats_placeholder.markdown(stats_html, unsafe_allow_html=True)
+        else:
+            stats_placeholder.info("No targets detected")
+        
+        # Display video feed
+        if 'display_frame' in locals():
+            display_rgb = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
+            video_placeholder.image(display_rgb, channels="RGB", use_container_width=True)
+        
+        # Auto-refresh for simulation
+        if mode == "🎮 Simulation Mode":
+            time.sleep(0.05)
+            st.rerun()
     
-    # Release resources when done
-    if cap is not None:
-        cap.release()
+    # Threat history graph
+    if len(st.session_state.detector.threat_history) > 5:
+        st.markdown("## 📈 THREAT HISTORY")
+        
+        hist_df = pd.DataFrame([{
+            'Time': h['timestamp'].strftime("%H:%M:%S"),
+            'Critical': h.get('critical_count', 0),
+            'High': h.get('high_count', 0),
+            'Total': h['count']
+        } for h in st.session_state.detector.threat_history[-30:]])
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=hist_df['Time'], y=hist_df['Critical'], 
+                                 name='CRITICAL', line=dict(color='red', width=2)))
+        fig.add_trace(go.Scatter(x=hist_df['Time'], y=hist_df['High'], 
+                                 name='HIGH', line=dict(color='orange', width=2)))
+        fig.add_trace(go.Scatter(x=hist_df['Time'], y=hist_df['Total'], 
+                                 name='Total Tracks', line=dict(color='cyan', width=1, dash='dash')))
+        
+        fig.update_layout(
+            height=300,
+            plot_bgcolor='rgba(0,0,0,0.3)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='white'),
+            title="Threat Level Timeline"
+        )
+        st.plotly_chart(fig, use_container_width=True)
     
     # Footer
     st.markdown("---")
-    st.markdown("### 🎯 Key Features")
-    feature_cols = st.columns(4)
-    with feature_cols[0]:
-        st.markdown("✅ **Real-time Detection**")
-        st.markdown("*Instant object identification*")
-    with feature_cols[1]:
-        st.markdown("✅ **Multi-object Tracking**")
-        st.markdown("*Track multiple objects simultaneously*")
-    with feature_cols[2]:
-        st.markdown("✅ **Motion Analysis**")
-        st.markdown("*Movement trails and patterns*")
-    with feature_cols[3]:
-        st.markdown("✅ **Smart Classification**")
-        st.markdown("*9+ flying object types*")
-    
-    # Show detection history graph
-    if len(st.session_state.detector.detection_history) > 1:
-        st.markdown("## 📈 Detection History")
-        
-        # Prepare data for graph
-        hist_data = []
-        for h in st.session_state.detector.detection_history[-50:]:
-            if isinstance(h, dict) and 'timestamp' in h and 'count' in h:
-                hist_data.append({
-                    'Time': h['timestamp'].strftime("%H:%M:%S"),
-                    'Count': h['count']
-                })
-        
-        if hist_data:
-            hist_df = pd.DataFrame(hist_data)
-            
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=hist_df['Time'],
-                y=hist_df['Count'],
-                mode='lines+markers',
-                name='Objects Detected',
-                line=dict(color='cyan', width=2),
-                marker=dict(size=4, color='yellow')
-            ))
-            fig.update_layout(
-                title="Objects Detected Over Time",
-                xaxis_title="Time",
-                yaxis_title="Number of Objects",
-                height=300,
-                plot_bgcolor='rgba(0,0,0,0.3)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='white')
-            )
-            st.plotly_chart(fig, use_container_width=True)
-    
-    # Show camera permissions info if needed
-    if source_option == "📹 Webcam" and not st.session_state.is_detecting:
-        st.markdown('<div class="info-box">', unsafe_allow_html=True)
-        st.markdown("""
-        **📸 Webcam Setup:**
-        1. Click 'Start Detection' above
-        2. Allow camera permissions when prompted by your browser
-        3. Make sure no other application is using your camera
-        4. For best results, ensure good lighting
-        """)
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("### 🛡️ System Capabilities")
+    cols = st.columns(5)
+    with cols[0]:
+        st.markdown("**✈️ Fighter Jets**\nF-16, F-22, F-35, Su-57")
+    with cols[1]:
+        st.markdown("**🚁 Attack Helos**\nAH-64, Mi-24, Ka-52")
+    with cols[2]:
+        st.markdown("**🛸 Combat Drones**\nMQ-9, Bayraktar, Switchblade")
+    with cols[3]:
+        st.markdown("**💣 Missiles**\nCruise, Ballistic, Rockets")
+    with cols[4]:
+        st.markdown("**🎯 Threat Assessment**\nCritical/High/Medium/Low")
 
 if __name__ == "__main__":
     main()
