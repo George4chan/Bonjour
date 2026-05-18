@@ -1,6 +1,6 @@
-streamlit
-opencv-python-headless
-numpy
-pandas
-plotly
-Pillow
+streamlit==1.28.1
+opencv-python-headless==4.8.1.78
+numpy==1.24.3
+pandas==2.0.3
+plotly==5.17.0
+Pillow==10.0.1
