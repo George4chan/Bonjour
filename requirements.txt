@@ -4,3 +4,9 @@ numpy==1.24.3
 pandas==2.0.3
 plotly==5.17.0
 Pillow==10.0.1
+git init
+git add .
+git commit -m "Radar system with Python 3.11"
+git branch -M main
+git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
+git push -u origin main
