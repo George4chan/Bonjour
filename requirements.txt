@@ -1,4 +1,6 @@
+cat > requirements.txt << 'EOF'
 streamlit
 requests
 pillow
 pandas
+EOF
