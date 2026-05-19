@@ -1,60 +1,47 @@
 import streamlit as st
 import requests
-import pandas as pd
-import numpy as np
 import math
 from datetime import datetime
 import time
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
+import pandas as pd
 
 st.set_page_config(
-    page_title="Real Flight Radar",
-    page_icon="🛸",
+    page_title="Haiti 360° Radar System",
+    page_icon="🇭🇹",
     layout="wide"
 )
 
-# Custom CSS
+# Military Green Theme
 st.markdown("""
 <style>
-    .stApp {
-        background: #0a0f0a;
-    }
-    .radar-title {
-        text-align: center;
-        margin-bottom: 20px;
-    }
-    .radar-title h1 {
-        color: #00ff00;
-        text-shadow: 0 0 10px #00ff00;
-        font-family: monospace;
-    }
-    .info-box {
-        background: #0a1a0a;
-        border: 1px solid #00ff00;
-        border-radius: 5px;
-        padding: 10px;
-        margin: 5px 0;
-    }
-    .flight-card {
-        background: #0a0a0a;
-        border-left: 4px solid #00ff00;
-        border-radius: 5px;
+    .stApp { background: #050805; }
+    .main-title { text-align: center; margin-bottom: 20px; }
+    .main-title h1 { color: #00ff00; font-family: 'Courier New', monospace; text-shadow: 0 0 10px #00ff00; }
+    .target-card {
+        background: #0a150a;
+        border-left: 3px solid #00ff00;
         padding: 8px;
         margin: 5px 0;
+        border-radius: 3px;
+        font-family: monospace;
     }
 </style>
 """, unsafe_allow_html=True)
 
-class RealFlightRadar:
+# ============================================================
+# HAITI COORDINATES - REAL AIRSPACE
+# ============================================================
+RADAR_CENTER = {"lat": 18.5754, "lon": -72.2947}  # PAP Airport, Haiti
+RANGE_KM = 200
+
+class HaitiRealRadar:
     def __init__(self):
-        self.flights = []
-        self.center_lat = 40.7128
-        self.center_lon = -74.0060
-        self.range_km = 200
-        self.last_error = None
+        self.center_lat = RADAR_CENTER["lat"]
+        self.center_lon = RADAR_CENTER["lon"]
         
-    def calculate_distance(self, lat1, lon1, lat2, lon2):
-        """Calculate distance between two points in km"""
+    def haversine_distance(self, lat1, lon1, lat2, lon2):
+        """Calculate distance in km - REAL MATH"""
         R = 6371
         lat1_rad = math.radians(lat1)
         lat2_rad = math.radians(lat2)
@@ -63,11 +50,10 @@ class RealFlightRadar:
         
         a = math.sin(delta_lat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon/2)**2
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        
         return R * c
     
     def calculate_bearing(self, lat1, lon1, lat2, lon2):
-        """Calculate bearing from point1 to point2"""
+        """Calculate bearing in degrees"""
         lat1_rad = math.radians(lat1)
         lat2_rad = math.radians(lat2)
         delta_lon = math.radians(lon2 - lon1)
@@ -75,358 +61,288 @@ class RealFlightRadar:
         x = math.sin(delta_lon) * math.cos(lat2_rad)
         y = math.cos(lat1_rad) * math.sin(lat2_rad) - math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(delta_lon)
         
-        bearing = math.atan2(x, y)
-        bearing = math.degrees(bearing)
-        bearing = (bearing + 360) % 360
-        
-        return bearing
+        bearing = math.degrees(math.atan2(x, y))
+        return (bearing + 360) % 360
     
-    def get_live_flights(self):
-        """Get real flight data from OpenSky Network API"""
+    def fetch_real_flights(self):
+        """Get REAL aircraft from OpenSky Network API"""
         try:
-            # Use a timeout to prevent hanging
+            # Bounding box for Haiti region (17N-20N, 75W-71W)
             url = "https://opensky-network.org/api/states/all"
-            response = requests.get(url, timeout=15, headers={'User-Agent': 'Streamlit Radar App'})
+            response = requests.get(url, timeout=12, headers={'User-Agent': 'HaitiRadar/1.0'})
             
-            if response.status_code == 200:
-                data = response.json()
-                states = data.get('states', [])
-                
-                flights = []
-                for state in states:
-                    try:
-                        # Extract flight data
-                        callsign = state[1] if state[1] else None
-                        lon = state[5]  # Longitude
-                        lat = state[6]  # Latitude
-                        altitude = state[7]  # Altitude in meters
-                        velocity = state[9]  # Speed in m/s
+            if response.status_code != 200:
+                return []
+            
+            data = response.json()
+            states = data.get('states', [])
+            
+            flights = []
+            for state in states:
+                try:
+                    callsign = state[1].strip() if state[1] else None
+                    lon = state[5]
+                    lat = state[6]
+                    altitude = state[7]
+                    velocity = state[9]
+                    
+                    if lat is None or lon is None:
+                        continue
+                    
+                    # Check if within Haiti region
+                    if 17.5 <= lat <= 20.0 and -75.0 <= lon <= -71.0:
+                        distance = self.haversine_distance(self.center_lat, self.center_lon, lat, lon)
                         
-                        # Skip if no position
-                        if lat is None or lon is None:
-                            continue
-                        
-                        # Convert speed to km/h
-                        if velocity:
-                            speed_kmh = velocity * 3.6
-                        else:
-                            speed_kmh = 0
-                        
-                        # Calculate distance from radar center
-                        distance = self.calculate_distance(
-                            self.center_lat, self.center_lon, lat, lon
-                        )
-                        
-                        # Only include flights within range
-                        if distance <= self.range_km:
-                            # Calculate bearing
-                            bearing = self.calculate_bearing(
-                                self.center_lat, self.center_lon, lat, lon
-                            )
+                        if distance <= RANGE_KM:
+                            speed_kmh = (velocity * 3.6) if velocity else 0
+                            bearing = self.calculate_bearing(self.center_lat, self.center_lon, lat, lon)
                             
-                            # Clean up callsign
-                            if callsign:
-                                callsign = callsign.strip()
+                            # Determine aircraft type (rough estimate)
+                            if altitude and altitude < 3000:
+                                aircraft_type = "HELICOPTER"
+                            elif altitude and altitude < 8000:
+                                aircraft_type = "SMALL AIRCRAFT"
                             else:
-                                callsign = f"FL{len(flights)+1}"
+                                aircraft_type = "COMMERCIAL JET"
                             
                             flights.append({
-                                'callsign': callsign,
-                                'latitude': lat,
-                                'longitude': lon,
-                                'altitude': altitude if altitude else 0,
-                                'speed': round(speed_kmh, 1),
+                                'callsign': callsign if callsign else f"FL{len(flights)+1:03d}",
                                 'distance': round(distance, 1),
                                 'bearing': round(bearing, 1),
-                                'angle': bearing
+                                'angle': bearing,
+                                'altitude': round(altitude) if altitude else 0,
+                                'speed': round(speed_kmh, 1),
+                                'type': aircraft_type
                             })
-                    except Exception as e:
-                        continue
-                
-                self.last_error = None
-                return flights
-            else:
-                self.last_error = f"API returned {response.status_code}"
-                return []
-                
-        except requests.exceptions.Timeout:
-            self.last_error = "Request timeout - API may be slow"
-            return []
-        except requests.exceptions.ConnectionError:
-            self.last_error = "Connection error - Check internet"
-            return []
+                except:
+                    continue
+            
+            return flights
         except Exception as e:
-            self.last_error = str(e)
+            st.warning(f"API Connection: {str(e)[:50]}")
             return []
-    
-    def get_sample_flights(self):
-        """Return sample flight data for demonstration"""
-        return [
-            {'callsign': 'UAL123', 'distance': 25.3, 'bearing': 45.0, 'angle': 45.0, 'altitude': 3500, 'speed': 850},
-            {'callsign': 'DAL456', 'distance': 52.1, 'bearing': 120.0, 'angle': 120.0, 'altitude': 5200, 'speed': 780},
-            {'callsign': 'AAL789', 'distance': 87.4, 'bearing': 210.0, 'angle': 210.0, 'altitude': 2800, 'speed': 650},
-            {'callsign': 'SWA234', 'distance': 142.6, 'bearing': 310.0, 'angle': 310.0, 'altitude': 4100, 'speed': 720},
-            {'callsign': 'JBU567', 'distance': 175.2, 'bearing': 15.0, 'angle': 15.0, 'altitude': 3800, 'speed': 800},
-        ]
 
-def draw_radar(flights, center_lat, center_lon, range_km, scan_angle, width=800, height=800):
-    """Draw radar display"""
+# ============================================================
+# RADAR DISPLAY - EXACT MATCH TO CHATGPT IMAGE
+# ============================================================
+def draw_radar_image(flights, scan_angle, width=800, height=800):
+    """Draw the 360° radar exactly like the ChatGPT image"""
     
-    img = Image.new('RGB', (width, height), color=(0, 10, 0))
+    img = Image.new('RGB', (width, height), color=(0, 8, 0))
     draw = ImageDraw.Draw(img)
     
     center = (width // 2, height // 2)
-    max_radius = min(width, height) // 2 - 60
+    max_radius = min(width, height) // 2 - 50
     
-    # Draw outer circle
+    # ===== OUTER CIRCLE (360° BORDER) =====
     draw.ellipse([center[0] - max_radius, center[1] - max_radius,
                   center[0] + max_radius, center[1] + max_radius],
-                 outline=(0, 200, 0), width=3)
+                 outline=(0, 180, 0), width=3)
     
-    # Draw range rings
-    for i in range(1, 6):
-        radius = int(max_radius * (i / 5))
+    # ===== RANGE RINGS (50km, 100km, 150km, 200km) =====
+    rings = [50, 100, 150, 200]
+    for i, ring_km in enumerate(rings):
+        radius = int(max_radius * (ring_km / RANGE_KM))
         draw.ellipse([center[0] - radius, center[1] - radius,
                       center[0] + radius, center[1] + radius],
-                     outline=(0, 80, 0), width=1)
-        
-        range_label = int((i / 5) * range_km)
-        draw.text((center[0] + radius - 30, center[1] + 5), f"{range_label}km", fill=(0, 150, 0))
+                     outline=(0, 70, 0), width=1)
+        # Ring label
+        draw.text((center[0] + radius - 25, center[1] + 5), f"{ring_km}KM", fill=(0, 120, 0))
     
-    # Draw crosshairs
-    draw.line([(center[0], center[1] - max_radius), (center[0], center[1] + max_radius)],
-              fill=(0, 60, 0), width=1)
-    draw.line([(center[0] - max_radius, center[1]), (center[0] + max_radius, center[1])],
-              fill=(0, 60, 0), width=1)
-    
-    # Draw cardinal directions
-    directions = [(0, "N"), (45, "NE"), (90, "E"), (135, "SE"), 
-                  (180, "S"), (225, "SW"), (270, "W"), (315, "NW")]
-    
-    for angle, label in directions:
+    # ===== CROSSHAIRS (Radial lines) =====
+    for angle in range(0, 360, 30):
         rad = math.radians(angle)
-        x = center[0] + int((max_radius + 25) * math.cos(rad))
-        y = center[1] + int((max_radius + 25) * math.sin(rad))
+        x = center[0] + int(max_radius * math.cos(rad))
+        y = center[1] + int(max_radius * math.sin(rad))
+        draw.line([center, (x, y)], fill=(0, 50, 0), width=1)
+    
+    # ===== CARDINAL & INTERCARDINAL LABELS (like ChatGPT image) =====
+    labels = [
+        (0, "0°", "NORTH"), (30, "30°", ""), (60, "60°", ""),
+        (90, "90°", "EAST"), (120, "120°", ""), (150, "150°", ""),
+        (180, "180°", "SOUTH"), (210, "210°", ""), (240, "240°", ""),
+        (270, "270°", "WEST"), (300, "300°", ""), (330, "330°", "")
+    ]
+    
+    for angle, deg_label, cardinal in labels:
+        rad = math.radians(angle)
+        label_radius = max_radius + 20
+        x = center[0] + int(label_radius * math.cos(rad))
+        y = center[1] + int(label_radius * math.sin(rad))
         
+        # Adjust positions for cardinals
         if angle == 0:
-            x, y = center[0] - 10, center[1] - max_radius - 15
+            x, y = center[0] - 25, center[1] - max_radius - 15
         elif angle == 90:
             x, y = center[0] + max_radius + 15, center[1] - 8
         elif angle == 180:
-            x, y = center[0] - 10, center[1] + max_radius + 10
+            x, y = center[0] - 30, center[1] + max_radius + 10
         elif angle == 270:
-            x, y = center[0] - max_radius - 35, center[1] - 8
+            x, y = center[0] - max_radius - 45, center[1] - 8
         
-        draw.text((x, y), label, fill=(0, 200, 0))
+        draw.text((x, y), deg_label, fill=(0, 180, 0))
+        if cardinal:
+            draw.text((x, y + 15), cardinal, fill=(0, 200, 0))
     
-    # Draw flights
-    for flight in flights:
-        distance_ratio = flight['distance'] / range_km
-        if distance_ratio > 1:
+    # ===== DRAW REAL TARGETS =====
+    for i, flight in enumerate(flights):
+        dist_ratio = flight['distance'] / RANGE_KM
+        if dist_ratio > 1:
             continue
-            
-        angle_rad = math.radians(flight['angle'])
-        x = center[0] + int(distance_ratio * max_radius * math.cos(angle_rad))
-        y = center[1] + int(distance_ratio * max_radius * math.sin(angle_rad))
         
-        # Color based on distance
-        if flight['distance'] < 50:
-            color = (255, 0, 0)
-            size = 8
-        elif flight['distance'] < 100:
+        angle_rad = math.radians(flight['angle'])
+        x = center[0] + int(dist_ratio * max_radius * math.cos(angle_rad))
+        y = center[1] + int(dist_ratio * max_radius * math.sin(angle_rad))
+        
+        # Color by type
+        if flight['type'] == "HELICOPTER":
             color = (255, 100, 0)
-            size = 7
+        elif flight['type'] == "SMALL AIRCRAFT":
+            color = (255, 200, 0)
         else:
             color = (0, 255, 0)
-            size = 6
         
-        # Draw target
-        draw.ellipse([x-size, y-size, x+size, y+size], fill=color, outline=(0, 255, 0))
-        draw.text((x+8, y-8), flight['callsign'][:6], fill=(0, 255, 0))
+        # Draw target blip
+        draw.ellipse([x-7, y-7, x+7, y+7], fill=color, outline=(0, 255, 0), width=1)
+        
+        # Label like "TARGET01" format from ChatGPT image
+        target_label = f"TARGET{flight.get('index', i+1):02d}"
+        draw.text((x + 10, y - 12), target_label, fill=(0, 255, 0))
+        
+        # Distance label below
+        draw.text((x - 20, y + 10), f"{flight['distance']}KM", fill=(0, 200, 0))
     
-    # Draw scanning line
-    rad = math.radians(scan_angle)
-    scan_x = center[0] + int(max_radius * math.cos(rad))
-    scan_y = center[1] + int(max_radius * math.sin(rad))
+    # ===== ROTATING SCAN LINE =====
+    scan_rad = math.radians(scan_angle)
+    scan_x = center[0] + int(max_radius * math.cos(scan_rad))
+    scan_y = center[1] + int(max_radius * math.sin(scan_rad))
     draw.line([center, (scan_x, scan_y)], fill=(0, 255, 0), width=2)
     
-    # Draw center
-    draw.ellipse([center[0]-5, center[1]-5, center[0]+5, center[1]+5], fill=(0, 255, 0))
-    draw.text((center[0]-20, center[1]-15), "RADAR", fill=(0, 255, 0))
+    # Scan head glow
+    for r in range(6, 0, -1):
+        draw.ellipse([scan_x - r, scan_y - r, scan_x + r, scan_y + r], 
+                     fill=(0, 255, 0), outline=(0, 255, 0))
+    
+    # Center dot
+    draw.ellipse([center[0] - 8, center[1] - 8, center[0] + 8, center[1] + 8], 
+                 fill=(0, 50, 0), outline=(0, 150, 0))
+    draw.ellipse([center[0] - 3, center[1] - 3, center[0] + 3, center[1] + 3], 
+                 fill=(0, 255, 0))
     
     return img
 
+# ============================================================
+# MAIN APP
+# ============================================================
 def main():
     st.markdown("""
-    <div class="radar-title">
-        <h1>🛸 REAL FLIGHT RADAR SYSTEM</h1>
-        <p>Live Air Traffic | Real ADS-B Data | 200km Range</p>
+    <div class="main-title">
+        <h1>🇭🇹 360° REAL HAITI RADAR SYSTEM</h1>
+        <p style="color: #00aa00;">REAL ADS-B DATA | PORT-AU-PRINCE (PAP) | 200KM RANGE</p>
     </div>
     """, unsafe_allow_html=True)
     
     # Sidebar
     with st.sidebar:
-        st.markdown("## 📍 RADAR LOCATION")
-        
-        location_option = st.radio(
-            "Select Location",
-            ["New York (JFK)", "London (LHR)", "Tokyo (HND)", "Dubai (DXB)", "Los Angeles (LAX)"]
-        )
-        
-        locations = {
-            "New York (JFK)": (40.6413, -73.7781),
-            "London (LHR)": (51.4700, -0.4543),
-            "Tokyo (HND)": (35.5494, 139.7798),
-            "Dubai (DXB)": (25.2528, 55.3644),
-            "Los Angeles (LAX)": (33.9416, -118.4085)
-        }
-        
-        lat, lon = locations[location_option]
+        st.markdown("## 🎯 RADAR STATION")
+        st.markdown("**Location:** Port-au-Prince, Haiti")
+        st.markdown("**Airport:** Toussaint Louverture (PAP)")
+        st.markdown("**Coordinates:** 18.5754°N, 72.2947°W")
+        st.markdown("**Range:** 200km")
         
         st.markdown("---")
-        st.markdown("## ⚙️ RADAR SETTINGS")
-        
-        radar_range = st.slider("Detection Range (km)", 50, 300, 200, 25)
-        use_real_data = st.checkbox("Use Real Flight Data", value=True, help="Toggle between real data and demo")
+        st.markdown("## ⚠️ CAPABILITIES")
+        st.markdown("✅ **REAL AIRPLANES** - Live ADS-B data")
+        st.markdown("✅ **REAL HELICOPTERS** - When transponder equipped")
+        st.markdown("❌ **CONSUMER DRONES** - Not detectable via radar")
+        st.markdown("")
+        st.markdown("*Drones require physical RF sensors or military radar*")
         
         st.markdown("---")
-        st.markdown("## ℹ️ DATA SOURCE")
-        st.info("""
-        **Real Data from OpenSky Network**
-        - Live ADS-B aircraft transponder data
-        - Updates every 10 seconds
-        - Shows real commercial & private flights
-        - Free public API
-        
-        **Toggle off for demo mode** if API is unavailable
-        """)
+        st.markdown(f"**Last Scan:** {datetime.now().strftime('%H:%M:%S')}")
     
-    # Initialize session state
+    # Initialize
     if 'radar' not in st.session_state:
-        st.session_state.radar = RealFlightRadar()
+        st.session_state.radar = HaitiRealRadar()
         st.session_state.scan_angle = 0
-        st.session_state.last_refresh = 0
+        st.session_state.last_fetch = 0
         st.session_state.flights = []
-        st.session_state.api_error = False
     
-    # Update radar settings
-    st.session_state.radar.center_lat = lat
-    st.session_state.radar.center_lon = lon
-    st.session_state.radar.range_km = radar_range
-    
-    # Get flight data
+    # Fetch real data every 15 seconds
     current_time = time.time()
-    if current_time - st.session_state.last_refresh >= 10:  # Refresh every 10 seconds
-        if use_real_data:
-            with st.spinner("Fetching live flight data from OpenSky Network..."):
-                flights = st.session_state.radar.get_live_flights()
-                if flights:
-                    st.session_state.flights = flights
-                    st.session_state.api_error = False
-                else:
-                    # Use sample data if real data fails
-                    st.session_state.flights = st.session_state.radar.get_sample_flights()
-                    if st.session_state.radar.last_error:
-                        st.session_state.api_error = st.session_state.radar.last_error
-        else:
-            # Demo mode - use sample data
-            st.session_state.flights = st.session_state.radar.get_sample_flights()
-        
-        st.session_state.last_refresh = current_time
+    if current_time - st.session_state.last_fetch >= 15:
+        with st.spinner("🛰️ Scanning Haitian airspace for REAL aircraft..."):
+            st.session_state.flights = st.session_state.radar.fetch_real_flights()
+            # Add index for display
+            for idx, f in enumerate(st.session_state.flights):
+                f['index'] = idx + 1
+            st.session_state.last_fetch = current_time
     
-    # Update scan angle
-    st.session_state.scan_angle += 4
+    # Update scan animation
+    st.session_state.scan_angle += 3
     if st.session_state.scan_angle >= 360:
         st.session_state.scan_angle = 0
-    
-    # Show API error if any
-    if st.session_state.api_error and use_real_data:
-        st.warning(f"⚠️ Using demo data: {st.session_state.api_error}")
     
     # Layout
     col1, col2 = st.columns([2, 1])
     
     with col1:
         # Draw radar
-        radar_img = draw_radar(
-            st.session_state.flights,
-            lat, lon, radar_range,
-            st.session_state.scan_angle
-        )
+        radar_img = draw_radar_image(st.session_state.flights, st.session_state.scan_angle)
         st.image(radar_img, use_container_width=True)
         
-        # Status metrics
-        mcol1, mcol2, mcol3, mcol4 = st.columns(4)
-        mcol1.metric("RADAR STATUS", "🟢 ACTIVE")
-        mcol2.metric("AIRCRAFT", len(st.session_state.flights))
-        mcol3.metric("RANGE", f"{radar_range} km")
-        mcol4.metric("DATA SOURCE", "LIVE" if use_real_data and not st.session_state.api_error else "DEMO")
+        # Metrics
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("🟢 RADAR", "ACTIVE")
+        m2.metric("✈️ AIRCRAFT", len(st.session_state.flights))
+        m3.metric("📡 RANGE", "200 KM")
+        m4.metric("🔄 UPDATE", "15 SEC")
     
     with col2:
-        st.markdown("## ✈️ AIRCRAFT DETECTED")
+        st.markdown("## 🎯 REAL TARGETS")
         
         if st.session_state.flights:
-            # Sort by distance
-            sorted_flights = sorted(st.session_state.flights, key=lambda x: x['distance'])
-            
-            for flight in sorted_flights[:12]:
-                # Get bearing text
-                bearings = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
-                           'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
-                bearing_idx = int((flight['bearing'] + 11.25) / 22.5) % 16
-                bearing_str = bearings[bearing_idx]
-                
-                # Color coding
-                if flight['distance'] < 50:
-                    color = "#ff0000"
-                    threat = "🔴"
-                elif flight['distance'] < 100:
-                    color = "#ffaa00"
-                    threat = "🟠"
+            for flight in st.session_state.flights[:10]:
+                # Determine threat icon
+                if flight['type'] == "HELICOPTER":
+                    icon = "🚁"
+                elif flight['type'] == "SMALL AIRCRAFT":
+                    icon = "🛩️"
                 else:
-                    color = "#00ff00"
-                    threat = "🟢"
+                    icon = "✈️"
+                
+                # Bearing to direction
+                bearings = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+                idx = int((flight['bearing'] + 22.5) / 45) % 8
+                direction = bearings[idx]
                 
                 st.markdown(f"""
-                <div style="background: #0a0a0a; border-left: 4px solid {color}; 
-                            border-radius: 5px; padding: 8px; margin: 5px 0;">
-                    <div style="display: flex; justify-content: space-between;">
-                        <b>{threat} {flight['callsign']}</b>
-                        <span style="color: #00ff00;">{flight['distance']} km</span>
-                    </div>
-                    <div style="font-size: 11px; color: #00aa00;">
-                        Bearing: {bearing_str} ({flight['bearing']:.0f}°)<br>
-                        Alt: {flight['altitude']:.0f} m | Speed: {flight['speed']:.0f} km/h
-                    </div>
+                <div class="target-card">
+                    <b>{icon} {flight['callsign']}</b><br>
+                    📍 <b>{flight['distance']} KM</b> | {direction} ({flight['bearing']:.0f}°)<br>
+                    📈 {flight['altitude']:,} M | ⚡ {flight['speed']} KM/H<br>
+                    🏷️ {flight['type']}
                 </div>
                 """, unsafe_allow_html=True)
-            
-            if len(sorted_flights) > 12:
-                st.caption(f"+ {len(sorted_flights) - 12} more aircraft")
         else:
-            st.info("No aircraft detected in range")
-            st.caption("Try increasing range or changing location")
+            st.info("🚫 NO AIRCRAFT DETECTED IN HAITIAN AIRSPACE")
+            st.caption("The sky may be quiet or aircraft without transponders")
         
-        # Statistics
+        # Stats
         if st.session_state.flights:
-            st.markdown("## 📊 AIR TRAFFIC STATS")
+            st.markdown("## 📊 AIRSPACE SUMMARY")
+            helicopters = [f for f in st.session_state.flights if f['type'] == "HELICOPTER"]
+            jets = [f for f in st.session_state.flights if f['type'] == "COMMERCIAL JET"]
             
-            distances = [f['distance'] for f in st.session_state.flights]
-            altitudes = [f['altitude'] for f in st.session_state.flights]
+            st.metric("🚁 Helicopters", len(helicopters))
+            st.metric("✈️ Commercial Jets", len(jets))
             
-            col1, col2 = st.columns(2)
-            col1.metric("Avg Distance", f"{sum(distances)/len(distances):.0f} km")
-            col2.metric("Avg Altitude", f"{sum(altitudes)/len(altitudes):.0f} m")
-            
-            # Closest aircraft
-            closest = min(st.session_state.flights, key=lambda x: x['distance'])
-            st.info(f"**✈️ Closest:** {closest['callsign']}\n{closest['distance']} km at {closest['bearing']:.0f}°")
-            
-            # Update time
-            st.caption(f"Last update: {datetime.now().strftime('%H:%M:%S')}")
+            if st.session_state.flights:
+                closest = min(st.session_state.flights, key=lambda x: x['distance'])
+                st.warning(f"⚠️ CLOSEST: {closest['callsign']} at {closest['distance']} KM")
     
-    # Auto-refresh
-    time.sleep(0.1)
+    # Auto-refresh for animation
+    time.sleep(0.08)
     st.rerun()
 
 if __name__ == "__main__":
