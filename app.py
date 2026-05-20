@@ -185,6 +185,7 @@ def draw_radar_image(flights, scan_angle, width=800, height=800):
         (270, "270°", "WEST"), (300, "300°", ""), (330, "330°", "")
     ]
     
+    
     for angle, deg_label, cardinal in degree_labels:
         rad = math.radians(angle)
         label_radius = max_radius + 20
@@ -386,6 +387,13 @@ def main():
             if st.session_state.flights:
                 closest = min(st.session_state.flights, key=lambda x: x['distance'])
                 st.warning(f"⚠️ CLOSEST: {closest['callsign']} at {closest['distance']} KM")
+                # In fetch_real_flights(), change this:
+if not flights:
+    return self.get_sample_data()  # ← This shows fake data
+
+# To this:
+if not flights:
+    return []  # ← Shows nothing when API has no data
     
     # Auto-refresh for animation
     time.sleep(0.08)
@@ -393,10 +401,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # In fetch_real_flights(), change this:
-if not flights:
-    return self.get_sample_data()  # ← This shows fake data
 
-# To this:
-if not flights:
-    return []  # ← Shows nothing when API has no data
