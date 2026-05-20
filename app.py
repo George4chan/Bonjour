@@ -393,3 +393,10 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # In fetch_real_flights(), change this:
+if not flights:
+    return self.get_sample_data()  # ← This shows fake data
+
+# To this:
+if not flights:
+    return []  # ← Shows nothing when API has no data
