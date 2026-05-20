@@ -374,3 +374,131 @@ def main():
 
 if __name__ == "__main__":
     main()
+    def draw_radar_image(flights, scan_angle, width=800, height=800):
+    """Draw the 360° radar display with full degree markings"""
+    img = Image.new('RGB', (width, height), color=(0, 8, 0))
+    draw = ImageDraw.Draw(img)
+    
+    center = (width // 2, height // 2)
+    max_radius = min(width, height) // 2 - 50
+    
+    # Outer circle
+    draw.ellipse([center[0] - max_radius, center[1] - max_radius,
+                  center[0] + max_radius, center[1] + max_radius],
+                 outline=(0, 180, 0), width=3)
+    
+    # Range rings (50, 100, 150, 200 km)
+    rings = [50, 100, 150, 200]
+    for ring_km in rings:
+        radius = int(max_radius * (ring_km / RANGE_KM))
+        draw.ellipse([center[0] - radius, center[1] - radius,
+                      center[0] + radius, center[1] + radius],
+                     outline=(0, 70, 0), width=1)
+        draw.text((center[0] + radius - 25, center[1] + 5), f"{ring_km}KM", fill=(0, 120, 0))
+    
+    # Radial lines (every 30 degrees)
+    for angle in range(0, 360, 30):
+        rad = math.radians(angle)
+        x = center[0] + int(max_radius * math.cos(rad))
+        y = center[1] + int(max_radius * math.sin(rad))
+        draw.line([center, (x, y)], fill=(0, 50, 0), width=1)
+    
+    # ===== FULL 360° DEGREE LABELS (0°, 30°, 60°, 90°, etc.) =====
+    # All degree markings
+    degree_labels = [
+        (0, "0°", "NORTH"), (30, "30°", ""), (60, "60°", ""),
+        (90, "90°", "EAST"), (120, "120°", ""), (150, "150°", ""),
+        (180, "180°", "SOUTH"), (210, "210°", ""), (240, "240°", ""),
+        (270, "270°", "WEST"), (300, "300°", ""), (330, "330°", "")
+    ]
+    
+    for angle, deg_label, cardinal in degree_labels:
+        rad = math.radians(angle)
+        label_radius = max_radius + 20
+        x = center[0] + int(label_radius * math.cos(rad))
+        y = center[1] + int(label_radius * math.sin(rad))
+        
+        # Adjust positions for cardinals (N/E/S/W)
+        if angle == 0:
+            x, y = center[0] - 25, center[1] - max_radius - 15
+        elif angle == 90:
+            x, y = center[0] + max_radius + 15, center[1] - 8
+        elif angle == 180:
+            x, y = center[0] - 30, center[1] + max_radius + 10
+        elif angle == 270:
+            x, y = center[0] - max_radius - 45, center[1] - 8
+        # For 30°, 60°, 120°, etc., use automatic positioning
+        elif angle == 30:
+            x, y = center[0] + int((max_radius + 25) * math.cos(rad)) - 10, center[1] + int((max_radius + 15) * math.sin(rad)) - 5
+        elif angle == 60:
+            x, y = center[0] + int((max_radius + 25) * math.cos(rad)) - 5, center[1] + int((max_radius + 15) * math.sin(rad)) - 10
+        elif angle == 120:
+            x, y = center[0] + int((max_radius + 25) * math.cos(rad)) - 15, center[1] + int((max_radius + 15) * math.sin(rad)) - 5
+        elif angle == 150:
+            x, y = center[0] + int((max_radius + 25) * math.cos(rad)) - 20, center[1] + int((max_radius + 15) * math.sin(rad)) - 5
+        elif angle == 210:
+            x, y = center[0] + int((max_radius + 25) * math.cos(rad)) - 15, center[1] + int((max_radius + 15) * math.sin(rad)) - 5
+        elif angle == 240:
+            x, y = center[0] + int((max_radius + 25) * math.cos(rad)) - 20, center[1] + int((max_radius + 15) * math.sin(rad)) - 5
+        elif angle == 300:
+            x, y = center[0] + int((max_radius + 25) * math.cos(rad)) - 10, center[1] + int((max_radius + 15) * math.sin(rad)) - 5
+        elif angle == 330:
+            x, y = center[0] + int((max_radius + 25) * math.cos(rad)) - 15, center[1] + int((max_radius + 15) * math.sin(rad)) - 5
+        else:
+            x = x - 10
+            y = y - 5
+        
+        draw.text((x, y), deg_label, fill=(0, 180, 0))
+        if cardinal:
+            draw.text((x, y + 15), cardinal, fill=(0, 200, 0))
+    
+    # Draw targets
+    for i, flight in enumerate(flights):
+        dist_ratio = flight['distance'] / RANGE_KM
+        if dist_ratio > 1:
+            continue
+        
+        angle_rad = math.radians(flight['angle'])
+        x = center[0] + int(dist_ratio * max_radius * math.cos(angle_rad))
+        y = center[1] + int(dist_ratio * max_radius * math.sin(angle_rad))
+        
+        # Color by type
+        if flight['type'] == "HELICOPTER":
+            color = (255, 100, 0)
+        elif flight['type'] == "DRONE":
+            color = (255, 50, 50)
+        elif flight['type'] == "SMALL AIRCRAFT":
+            color = (255, 200, 0)
+        else:
+            color = (0, 255, 0)
+        
+        # Target blip with glow
+        for r in range(8, 3, -2):
+            glow_color = tuple(int(c * 0.5) for c in color)
+            draw.ellipse([x-r, y-r, x+r, y+r], fill=glow_color)
+        
+        draw.ellipse([x-6, y-6, x+6, y+6], fill=color, outline=(0, 255, 0), width=1)
+        
+        # Target label (TARGET01 format like your ChatGPT image)
+        target_label = f"TARGET{i+1:02d}"
+        draw.text((x + 10, y - 12), target_label, fill=(0, 255, 0))
+        draw.text((x - 20, y + 10), f"{flight['distance']}KM", fill=(0, 200, 0))
+    
+    # Rotating scan line (animated)
+    scan_rad = math.radians(scan_angle)
+    scan_x = center[0] + int(max_radius * math.cos(scan_rad))
+    scan_y = center[1] + int(max_radius * math.sin(scan_rad))
+    draw.line([center, (scan_x, scan_y)], fill=(0, 255, 0), width=2)
+    
+    # Scan head glow
+    for r in range(6, 0, -1):
+        draw.ellipse([scan_x - r, scan_y - r, scan_x + r, scan_y + r], 
+                     fill=(0, 255, 0), outline=(0, 255, 0))
+    
+    # Center radar dot
+    draw.ellipse([center[0] - 8, center[1] - 8, center[0] + 8, center[1] + 8], 
+                 fill=(0, 50, 0), outline=(0, 150, 0))
+    draw.ellipse([center[0] - 3, center[1] - 3, center[0] + 3, center[1] + 3], 
+                 fill=(0, 255, 0))
+    
+    return img
